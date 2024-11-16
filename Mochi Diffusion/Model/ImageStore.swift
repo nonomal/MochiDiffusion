@@ -8,27 +8,49 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-@MainActor
-class ImageStore: ObservableObject {
+enum ImagesSortType: String {
+    case oldestFirst = "OLDEST_FIRST"
+    case newestFirst = "NEWEST_FIRST"
+
+    static let allValues: [ImagesSortType] = [.oldestFirst, .newestFirst]
+}
+
+@Observable public final class ImageStore {
 
     static let shared = ImageStore()
 
     private var allImages: [SDImage] = [] {
         didSet {
             updateFilteredImages()
+            updateSortForImages()
         }
     }
 
-    @Published
     private(set) var images: [SDImage] = []
 
-    @Published
+    private(set) var currentGeneratingImage: CGImage?
+
     private(set) var selectedId: SDImage.ID?
 
-    @Published
-    var searchText: String = "" {
+    var filters: [Filter] = [Filter]() {
         didSet {
             updateFilteredImages()
+            updateSortForImages()
+        }
+    }
+
+    @ObservationIgnored @AppStorage("GallerySort") private var _sortType: ImagesSortType =
+        .oldestFirst
+    @ObservationIgnored var sortType: ImagesSortType {
+        get {
+            access(keyPath: \.sortType)
+            return _sortType
+        }
+        set {
+            withMutation(keyPath: \.sortType) {
+                _sortType = newValue
+                updateSortForImages()
+            }
         }
     }
 
@@ -36,6 +58,7 @@ class ImageStore: ObservableObject {
     func add(_ sdi: SDImage) -> SDImage.ID {
         withAnimation {
             allImages.append(sdi)
+            currentGeneratingImage = nil
             return sdi.id
         }
     }
@@ -48,8 +71,20 @@ class ImageStore: ObservableObject {
         }
     }
 
+    func setCurrentGenerating(image: CGImage?) {
+        currentGeneratingImage = image
+    }
+
     func remove(_ sdi: SDImage) {
         remove(sdi.id)
+    }
+
+    func remove(_ sdis: [SDImage]) {
+        withAnimation {
+            allImages.removeAll { sdi in
+                sdis.map { $0.id }.contains(sdi.id)
+            }
+        }
     }
 
     func remove(_ id: SDImage.ID) {
@@ -67,7 +102,8 @@ class ImageStore: ObservableObject {
         remove(sdi.id)
         if sdi.path.isEmpty { return }
         if moveToTrash {
-            try? FileManager.default.trashItem(at: URL(fileURLWithPath: sdi.path, isDirectory: false), resultingItemURL: nil)
+            try? FileManager.default.trashItem(
+                at: URL(fileURLWithPath: sdi.path, isDirectory: false), resultingItemURL: nil)
         } else {
             try? FileManager.default.removeItem(atPath: sdi.path)
         }
@@ -78,6 +114,12 @@ class ImageStore: ObservableObject {
             guard let index = index(for: sdi.id) else { return }
             allImages.remove(at: index)
         }
+    }
+
+    func updateMetadata(_ sdi: SDImage, colorNumber: Int) {
+        guard let index = index(for: sdi.id) else { return }
+        allImages[index] = sdi
+        allImages[index].finderTagColorNumber = colorNumber
     }
 
     func update(_ sdi: SDImage) {
@@ -126,28 +168,36 @@ class ImageStore: ObservableObject {
     }
 
     func imageAfter(_ id: SDImage.ID?, wrap: Bool = true) -> SDImage.ID? {
-        guard let id, let index = images.firstIndex(where: { $0.id == id }), index < images.count - 1 else {
+        guard let id, let index = images.firstIndex(where: { $0.id == id }),
+            index < images.count - 1
+        else {
             return wrap ? images.first?.id : nil
         }
         return images[index + 1].id
     }
 
     private func updateFilteredImages() {
-        withAnimation {
-            if searchText.isEmpty {
-                images = allImages
-            } else {
-                images = allImages.filter(searchText)
-            }
+        if filters.isEmpty {
+            images = allImages
+        } else {
+            images = allImages.filter(filters)
+        }
+    }
+
+    private func updateSortForImages() {
+        switch sortType {
+        case .oldestFirst:
+            images.sort(by: { $0.generatedDate < $1.generatedDate })
+        case .newestFirst:
+            images.sort(by: { $0.generatedDate > $1.generatedDate })
         }
     }
 }
 
-private extension Array where Element == SDImage {
-    func filter(_ text: String) -> [SDImage] {
-        self.filter {
-            $0.prompt.range(of: text, options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]) != nil ||
-            $0.seed == UInt32(text)
+extension Array where Element == SDImage {
+    fileprivate func filter(_ filters: [Filter]) -> [SDImage] {
+        self.filter { image in
+            filters.allSatisfy({ $0.validate(image) })
         }
     }
 }

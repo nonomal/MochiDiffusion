@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct FileCommands: Commands {
-    @ObservedObject var store: ImageStore
+    var store: ImageStore
 
     var body: some Commands {
         CommandGroup(replacing: .saveItem) {
@@ -42,7 +42,9 @@ struct FileCommands: Commands {
             if let sdi = store.selected() {
                 Section {
                     Button {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: sdi.path).absoluteURL])
+                        NSWorkspace.shared.activateFileViewerSelecting([
+                            URL(fileURLWithPath: sdi.path).absoluteURL
+                        ])
                     } label: {
                         Text(
                             "Show in Finder",

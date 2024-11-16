@@ -9,60 +9,53 @@ import SwiftUI
 
 struct GalleryToolbarView: View {
     @Binding var isShowingInspector: Bool
-    @EnvironmentObject private var generator: ImageGenerator
-    @EnvironmentObject private var store: ImageStore
+    @Environment(ImageGenerator.self) private var generator: ImageGenerator
+    @Environment(ImageStore.self) private var store: ImageStore
     @State private var isStatusPopoverShown = false
 
     var body: some View {
-        if case .loading = generator.state {
-            Button {
-                self.isStatusPopoverShown.toggle()
-            } label: {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .controlSize(.small)
-                    .frame(width: 16)
-            }
-            .popover(isPresented: self.$isStatusPopoverShown, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Loading Model...")
-                    Text(
-                        "This may take up to 2 minutes if a model is used for the first time",
-                        comment: "Help text for the loading model message"
-                    )
-                    .foregroundColor(.secondary)
+        @Bindable var store = store
+
+        ZStack {
+            if case .running(let progress) = generator.state, let progress = progress,
+                progress.stepCount > 0
+            {
+                let step = progress.step + 1
+                let stepValue = Double(step) / Double(progress.stepCount)
+
+                Button {
+                    self.isStatusPopoverShown.toggle()
+                } label: {
+                    CircularProgressView(progress: stepValue)
+                        .frame(width: 16, height: 16)
                 }
-                .padding()
+            } else if case .loading = generator.state {
+                Button {
+                    self.isStatusPopoverShown.toggle()
+                } label: {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                        .frame(width: 16, height: 16)
+                }
             }
         }
+        .popover(isPresented: self.$isStatusPopoverShown, arrowEdge: .bottom) {
+            JobQueueView()
+                .frame(width: 420, height: 240)
+        }
 
-        if case let .running(progress) = generator.state, let progress = progress, progress.stepCount > 0 {
-            let step = Int(progress.step) + 1
-            let stepValue = Double(step) / Double(progress.stepCount)
-            let progressValue = Double(generator.queueProgress.index + 1) / Double(generator.queueProgress.total)
+        Picker("Sort", selection: $store.sortType) {
+            Text(
+                "Oldest First",
+                comment: "Picker option to sort images in the gallery from oldest to newest"
+            ).tag(ImagesSortType.oldestFirst)
 
-            Button {
-                self.isStatusPopoverShown.toggle()
-            } label: {
-                CircularProgressView(progress: stepValue)
-                    .frame(width: 16, height: 16)
-            }
-            .popover(isPresented: self.$isStatusPopoverShown, arrowEdge: .bottom) {
-                let stepLabel = String(
-                    localized: "Step \(step) of \(progress.stepCount)",
-                    comment: "Text displaying the current step progress and count"
-                )
-                let imageCountLabel = String(
-                    localized: "Image \(generator.queueProgress.index + 1) of \(generator.queueProgress.total)",
-                    comment: "Text displaying the image generation progress and count"
-                )
-                VStack(spacing: 12) {
-                    ProgressView(stepLabel, value: stepValue, total: 1)
-                    ProgressView(imageCountLabel, value: progressValue, total: 1)
-                }
-                .padding()
-                .frame(width: 300)
-            }
+            Text(
+                "Newest First",
+                comment: "Picker option to sort images in the gallery from newest to oldest"
+            )
+            .tag(ImagesSortType.newestFirst)
         }
 
         if let sdi = store.selected(), let img = sdi.image {
@@ -114,9 +107,7 @@ struct GalleryToolbarView: View {
         }
 
         Button {
-            withAnimation {
-                isShowingInspector.toggle()
-            }
+            isShowingInspector.toggle()
         } label: {
             Label {
                 Text(
@@ -127,6 +118,11 @@ struct GalleryToolbarView: View {
                 Image(systemName: "sidebar.right")
             }
         }
+
+        FilterTextFieldView(filters: $store.filters)
+            .frame(minWidth: 300)
+            .frame(maxWidth: 500)
+            .frame(height: 40)
     }
 
     @ViewBuilder
@@ -188,10 +184,8 @@ struct GalleryToolbarView: View {
     }
 }
 
-struct GalleryToolbarView_Previews: PreviewProvider {
-    static var previews: some View {
-        GalleryToolbarView(isShowingInspector: .constant(true))
-            .environmentObject(ImageGenerator.shared)
-            .environmentObject(ImageStore.shared)
-    }
+#Preview {
+    GalleryToolbarView(isShowingInspector: .constant(true))
+        .environment(ImageGenerator.shared)
+        .environment(ImageStore.shared)
 }

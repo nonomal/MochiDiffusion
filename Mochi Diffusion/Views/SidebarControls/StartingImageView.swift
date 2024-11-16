@@ -5,66 +5,33 @@
 //  Created by Joshua Park on 2/27/23.
 //
 
-import CompactSlider
 import SwiftUI
-
-struct ImageView: View {
-    @Binding var image: CGImage?
-
-    var body: some View {
-        if let image = image {
-            Image(image, scale: 1, label: Text(verbatim: ""))
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .padding(3)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 2)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                )
-        } else {
-            Image(systemName: "photo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundColor(Color(nsColor: .separatorColor))
-                .padding(30)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 2)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                )
-        }
-    }
-}
 
 struct StartingImageView: View {
     @EnvironmentObject private var controller: ImageController
     @State private var isInfoPopoverShown = false
 
     var body: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading) {
-                Text(
-                    "Starting Image",
-                    comment: "Label for setting the starting image (commonly known as image2image)"
-                )
-                .sidebarLabelFormat()
+        Text(
+            "Starting Image",
+            comment: "Label for setting the starting image (commonly known as image2image)"
+        )
+        .sidebarLabelFormat()
 
-                ImageView(image: $controller.startingImage)
-                    .frame(height: 90)
+        HStack(alignment: .top) {
+            ImageWellView(image: controller.startingImage, size: controller.currentModel?.inputSize)
+            { image in
+                if let image {
+                    ImageController.shared.setStartingImage(image: image)
+                } else {
+                    await ImageController.shared.unsetStartingImage()
+                }
             }
+            .frame(width: 90, height: 90)
 
             Spacer()
 
             VStack(alignment: .trailing) {
-                Text(
-                    "Strength",
-                    comment: "Label for starting image strength slider control"
-                )
-                .sidebarLabelFormat()
-
-                Slider(value: $controller.strength, in: 0.1...1, step: 0.1)
-                    .controlSize(.mini)
-                    .frame(width: 88)
-
                 HStack {
                     Button {
                         Task { await ImageController.shared.selectStartingImage() }
@@ -78,36 +45,43 @@ struct StartingImageView: View {
                         Image(systemName: "xmark")
                     }
                 }
+            }
+        }
 
-                Spacer()
+        HStack {
+            Text(
+                "Strength",
+                comment: "Label for starting image strength slider control"
+            )
+            .sidebarLabelFormat()
 
-                Button {
-                    self.isInfoPopoverShown.toggle()
-                } label: {
-                    Image(systemName: "info.circle")
-                        .foregroundColor(Color.secondary)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .popover(isPresented: self.$isInfoPopoverShown, arrowEdge: .top) {
-                    Text(
+            Spacer()
+
+            Button {
+                self.isInfoPopoverShown.toggle()
+            } label: {
+                Image(systemName: "info.circle")
+                    .foregroundColor(Color.secondary)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .popover(isPresented: self.$isInfoPopoverShown, arrowEdge: .top) {
+                Text(
                     """
                     Strength controls how closely the generated image resembles the starting image.
                     Use lower values to generate images that look similar to the starting image.
                     Use higher values to allow more creative freedom.
 
-                    The size of the starting image should be 512 x 512.
+                    The size of the starting image must match the output image size of the current model.
                     """
-                    )
-                    .padding()
-                }
+                )
+                .padding()
             }
         }
+        MochiSlider(value: $controller.strength, bounds: 0.0...1.0, step: 0.05)
     }
 }
 
-struct StartingImageView_Previews: PreviewProvider {
-    static var previews: some View {
-        StartingImageView()
-            .environmentObject(ImageController.shared)
-    }
+#Preview {
+    StartingImageView()
+        .environmentObject(ImageController.shared)
 }

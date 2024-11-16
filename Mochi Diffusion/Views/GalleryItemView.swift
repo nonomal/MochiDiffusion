@@ -37,10 +37,14 @@ private struct UpscalingAnimationView: View {
                 /// Random WandStars
                 ForEach(0..<8) { index in
                     let x = CGFloat.random(
-                        in: (index < 2 || (index >= 4 && index < 6)) ? 0...(geometry.size.width / 2) : (geometry.size.width / 2)...geometry.size.width
+                        in: (index < 2 || (index >= 4 && index < 6))
+                            ? 0...(geometry.size.width / 2)
+                            : (geometry.size.width / 2)...geometry.size.width
                     )
                     let y = CGFloat.random(
-                        in: (index < 4) ? 0...(geometry.size.height / 2) : (geometry.size.height / 2)...geometry.size.height
+                        in: (index < 4)
+                            ? 0...(geometry.size.height / 2)
+                            : (geometry.size.height / 2)...geometry.size.height
                     )
                     WandStar(size: CGFloat(Int.random(in: sizeRange)))
                         .blur(radius: isAnimated ? lowBlur : highBlur)
@@ -77,6 +81,10 @@ struct GalleryItemView: View {
                 if sdi.isUpscaling {
                     UpscalingAnimationView()
                 }
+                Text(finderTagColorNumberToString(self.sdi.finderTagColorNumber))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(8)
             }
         } else {
             Color.clear
@@ -84,13 +92,11 @@ struct GalleryItemView: View {
     }
 }
 
-struct UpscalingAnimation_Previews: PreviewProvider {
-    static var previews: some View {
-        VStack {
-            UpscalingAnimationView()
-                .frame(width: 300, height: 300)
-                .border(.selection, width: 5)
-        }
-        .frame(width: 350, height: 350)
+#Preview {
+    VStack {
+        UpscalingAnimationView()
+            .frame(width: 300, height: 300)
+            .border(.selection, width: 5)
     }
+    .frame(width: 350, height: 350)
 }

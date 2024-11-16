@@ -5,6 +5,7 @@
 //  Created by Joshua Park on 12/26/22.
 //
 
+import AppKit
 import CoreML
 import SwiftUI
 
@@ -23,18 +24,16 @@ struct ModelView: View {
             .labelsHidden()
 
             Button {
-                Task { await ImageController.shared.loadModels() }
+                NSWorkspace.shared.open(URL(fileURLWithPath: controller.modelDir))
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .frame(minWidth: 18)
+                Text(verbatim: "...")
             }
+            .help("Show models in Finder")
         }
     }
 }
 
-struct ModelView_Previews: PreviewProvider {
-    static var previews: some View {
-        ModelView()
-            .environmentObject(ImageController.shared)
-    }
+#Preview {
+    ModelView()
+        .environmentObject(ImageController.shared)
 }

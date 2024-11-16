@@ -5,7 +5,6 @@
 //  Created by Joshua Park on 12/26/22.
 //
 
-import CompactSlider
 import SwiftUI
 
 struct NumberOfImagesView: View {
@@ -14,17 +13,12 @@ struct NumberOfImagesView: View {
     var body: some View {
         Text("Number of Images")
             .sidebarLabelFormat()
-        CompactSlider(value: $controller.numberOfImages, in: 1...100, step: 1) {
-            Text(verbatim: "\(controller.numberOfImages.formatted(.number.precision(.fractionLength(0))))")
-            Spacer()
-        }
-        .compactSliderStyle(.mochi)
+        MochiSlider(
+            value: $controller.numberOfImages, bounds: 1...100, step: 1, strictUpperBound: false)
     }
 }
 
-struct NumberOfImagesView_Previews: PreviewProvider {
-    static var previews: some View {
-        NumberOfImagesView()
-            .environmentObject(ImageController.shared)
-    }
+#Preview {
+    NumberOfImagesView()
+        .environmentObject(ImageController.shared)
 }

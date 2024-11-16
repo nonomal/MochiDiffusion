@@ -8,36 +8,29 @@
 import SwiftUI
 
 struct AppView: View {
-    @EnvironmentObject private var store: ImageStore
+    @Environment(ImageStore.self) var store: ImageStore
     @State private var isShowingInspector = true
 
     var body: some View {
+        @Bindable var store = store
+
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 250, ideal: 300)
+                .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 450)
         } detail: {
-            HStack(spacing: 0) {
-                GalleryView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Divider()
-
-                if isShowingInspector {
+            GalleryView()
+                .inspector(isPresented: $isShowingInspector) {
                     InspectorView()
-                        .frame(maxWidth: 340)
+                        .inspectorColumnWidth(min: 300, ideal: 300, max: 500)
                 }
-            }
         }
         .toolbar {
             GalleryToolbarView(isShowingInspector: $isShowingInspector)
         }
-        .searchable(text: $store.searchText, prompt: "Search")
     }
 }
 
-struct AppView_Previews: PreviewProvider {
-    static var previews: some View {
-        AppView().previewLayout(.sizeThatFits)
-            .environmentObject(ImageStore.shared)
-    }
+#Preview {
+    AppView()
+        .environment(ImageStore.shared)
 }

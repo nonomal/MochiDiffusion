@@ -7,10 +7,10 @@
 
 import CoreML
 import Foundation
-import os
 import StableDiffusion
 import SwiftUI
 import UniformTypeIdentifiers
+import os
 
 typealias StableDiffusionProgress = StableDiffusionPipeline.Progress
 
@@ -42,10 +42,19 @@ final class ImageController: ObservableObject {
     private lazy var logger = Logger()
 
     @Published
+    var generationQueue = [GenerationConfig]()
+
+    @Published
+    var currentGeneration: GenerationConfig?
+
+    @Published
     var isLoading = true
 
     @Published
     private(set) var models = [SDModel]()
+
+    @Published
+    var controlNet: [String] = []
 
     @Published
     var startingImage: CGImage?
@@ -70,7 +79,8 @@ final class ImageController: ObservableObject {
     private var quicklookId: UUID? {
         didSet {
             quicklookURL = quicklookId.flatMap { id in
-                try? ImageStore.shared.image(with: id)?.image?.asNSImage().temporaryFileURL()
+                try? ImageStore.shared.image(with: id)?.image?.asTransferableImage().image
+                    .temporaryFileURL()
             }
         }
     }
@@ -81,50 +91,85 @@ final class ImageController: ObservableObject {
             guard let model = currentModel else {
                 return
             }
+
             modelName = model.name
-            Task {
-                logger.info("Started loading model: \"\(self.modelName)\"")
-                do {
-                    try await ImageGenerator.shared.load(
-                        model: model,
-                        computeUnit: mlComputeUnitPreference.computeUnits(forModel: model),
-                        reduceMemory: reduceMemory
-                    )
-                    logger.info("Stable Diffusion pipeline successfully loaded")
-                } catch ImageGenerator.GeneratorError.requestedModelNotFound {
-                    logger.error("Couldn't load \(self.modelName) because it doesn't exist.")
-                    modelName = ""
-                    currentModel = nil
-                } catch {
-                    modelName = ""
-                    currentModel = nil
-                }
-            }
+            controlNet = model.controlNet
+            currentControlNets = []
         }
     }
 
+    @Published
+    private(set) var currentControlNets: [(name: String?, image: CGImage?)] = []
+
     @AppStorage("ModelDir") var modelDir = ""
+    @AppStorage("ControlNetDir") var controlNetDir = ""
     @AppStorage("Model") private(set) var modelName = ""
     @AppStorage("AutosaveImages") var autosaveImages = true
     @AppStorage("ImageDir") var imageDir = ""
     @AppStorage("ImageType") var imageType = UTType.png.preferredFilenameExtension!
     @AppStorage("Prompt") var prompt = ""
     @AppStorage("NegativePrompt") var negativePrompt = ""
-    @AppStorage("ImageStrength") var strength = 0.7
+    @AppStorage("ImageStrength") var strength = 0.75
     @AppStorage("Steps") var steps = 12.0
     @AppStorage("Scale") var guidanceScale = 11.0
     @AppStorage("ImageWidth") var width = 512
     @AppStorage("ImageHeight") var height = 512
     @AppStorage("Scheduler") var scheduler: Scheduler = .dpmSolverMultistepScheduler
     @AppStorage("UpscaleGeneratedImages") var upscaleGeneratedImages = false
-    @AppStorage("MLComputeUnitPreference") var mlComputeUnitPreference: ComputeUnitPreference = .auto
+    @AppStorage("ShowGenerationPreview") var showGenerationPreview = true
+    @AppStorage("MLComputeUnitPreference") var mlComputeUnitPreference: ComputeUnitPreference =
+        .auto
     @AppStorage("ReduceMemory") var reduceMemory = false
     @AppStorage("SafetyChecker") var safetyChecker = false
     @AppStorage("UseTrash") var useTrash = true
 
+    private var imageFolderMonitor: FolderMonitor?
+    private var modelFolderMonitor: FolderMonitor?
+    private var controlNetFolderMonitor: FolderMonitor?
+
     init() {
         Task {
             await load()
+        }
+        self.imageFolderMonitor = FolderMonitor(path: imageDir) {
+            if let fileList = try? FileManager.default.contentsOfDirectory(atPath: self.imageDir) {
+                var additions = [SDImage]()
+                var removals = [SDImage]()
+                for filePath in fileList {
+                    if !ImageStore.shared.images.map({ URL(filePath: $0.path).lastPathComponent })
+                        .contains(where: {
+                            $0 == filePath
+                        })
+                    {
+                        let fileURL = URL(filePath: self.imageDir).appending(component: filePath)
+                        if let sdi = createSDImageFromURL(fileURL) {
+                            additions.append(sdi)
+                        }
+                    }
+                }
+                for sdi in ImageStore.shared.images {
+                    if !fileList.contains(where: {
+                        sdi.path.isEmpty  // ignore images generated with autosave disabled
+                            || $0 == URL(filePath: sdi.path).lastPathComponent
+                    }) {
+                        removals.append(sdi)
+                    }
+                }
+                Task {
+                    ImageStore.shared.add(additions)
+                    ImageStore.shared.remove(removals)
+                }
+            }
+        }
+        self.modelFolderMonitor = FolderMonitor(path: modelDir) {
+            Task {
+                await self.loadModels()
+            }
+        }
+        self.controlNetFolderMonitor = FolderMonitor(path: controlNetDir) {
+            Task {
+                await self.loadModels()
+            }
         }
     }
 
@@ -144,7 +189,8 @@ final class ImageController: ObservableObject {
         /// keep those images in gallery while loading from autosave directory so we don't lose their work
         ImageStore.shared.removeAllExceptUnsaved()
         do {
-            async let (images, imageDirURL) = try ImageGenerator.shared.loadImages(imageDir: imageDir)
+            async let (images, imageDirURL) = try ImageGenerator.shared.loadImages(
+                imageDir: imageDir)
             let count = try await images.count
             try await self.imageDir = imageDirURL.path(percentEncoded: false)
 
@@ -158,13 +204,37 @@ final class ImageController: ObservableObject {
         }
     }
 
+    private func directoryURL(fromPath directory: String, defaultingTo string: String) -> URL {
+        var finalModelDirURL: URL
+
+        /// check if saved directory exists
+        if directory.isEmpty {
+            /// use default directory
+            finalModelDirURL = FileManager.default.homeDirectoryForCurrentUser
+            finalModelDirURL.append(path: string, directoryHint: .isDirectory)
+        } else {
+            /// generate url from saved directory
+            finalModelDirURL = URL(fileURLWithPath: directory, isDirectory: true)
+        }
+
+        return finalModelDirURL
+    }
+
     func loadModels() async {
         models = []
         logger.info("Started loading model directory at: \"\(self.modelDir)\"")
         do {
-            async let (foundModels, modelDirURL) = try ImageGenerator.shared.getModels(modelDir: modelDir)
-            try await self.models = foundModels
-            try await self.modelDir = modelDirURL.path(percentEncoded: false)
+            let modelDirectoryURL = directoryURL(
+                fromPath: modelDir, defaultingTo: "MochiDiffusion/models/")
+            self.modelDir = modelDirectoryURL.path(percentEncoded: false)
+
+            let controlNetDirectoryURL = directoryURL(
+                fromPath: controlNetDir, defaultingTo: "MochiDiffusion/controlnet/")
+            self.controlNetDir = controlNetDirectoryURL.path(percentEncoded: false)
+
+            await self.models = try ImageGenerator.shared.getModels(
+                modelDirectoryURL: modelDirectoryURL, controlNetDirectoryURL: controlNetDirectoryURL
+            )
 
             logger.info("Found \(self.models.count) model(s)")
 
@@ -190,48 +260,94 @@ final class ImageController: ObservableObject {
     }
 
     func generate() async {
-        guard case .ready = ImageGenerator.shared.state,
-            let model = currentModel else {
+        guard let model = currentModel else {
             return
         }
 
         var pipelineConfig = StableDiffusionPipeline.Configuration(prompt: prompt)
         pipelineConfig.negativePrompt = negativePrompt
-        pipelineConfig.startingImage = startingImage
+        if let size = currentModel?.inputSize {
+            pipelineConfig.startingImage = startingImage?.scaledAndCroppedTo(size: size)
+        }
         pipelineConfig.strength = Float(strength)
         pipelineConfig.stepCount = Int(steps)
         pipelineConfig.seed = seed
         pipelineConfig.guidanceScale = Float(guidanceScale)
         pipelineConfig.disableSafety = !safetyChecker
         pipelineConfig.schedulerType = convertScheduler(scheduler)
+        for controlNet in currentControlNets {
+            if controlNet.name != nil, let size = currentModel?.inputSize,
+                let image = controlNet.image?.scaledAndCroppedTo(size: size)
+            {
+                pipelineConfig.controlNetInputs.append(image)
+            }
+        }
+        pipelineConfig.useDenoisedIntermediates = showGenerationPreview
 
         let genConfig = GenerationConfig(
             pipelineConfig: pipelineConfig,
+            isXL: model.isXL,
+            isSD3: model.isSD3,
             autosaveImages: autosaveImages,
             imageDir: imageDir,
             imageType: imageType,
             numberOfImages: Int(numberOfImages),
-            model: modelName,
+            model: model,
             mlComputeUnit: mlComputeUnitPreference.computeUnits(forModel: model),
             scheduler: scheduler,
-            upscaleGeneratedImages: upscaleGeneratedImages
+            upscaleGeneratedImages: upscaleGeneratedImages,
+            controlNets: currentControlNets.filter { $0.image != nil }.compactMap(\.name)
         )
 
+        self.generationQueue.append(genConfig)
         Task.detached(priority: .high) {
+            await self.runGenerationJobs()
+        }
+    }
+
+    private func runGenerationJobs() async {
+        guard case .ready = ImageGenerator.shared.state else { return }
+
+        while !self.generationQueue.isEmpty {
+            let genConfig = generationQueue.removeFirst()
+            self.currentGeneration = genConfig
             do {
+                try await ImageGenerator.shared.loadPipeline(
+                    model: genConfig.model,
+                    controlNet: genConfig.controlNets,
+                    computeUnit: genConfig.mlComputeUnit,
+                    reduceMemory: self.reduceMemory
+                )
                 try await ImageGenerator.shared.generate(genConfig)
+            } catch ImageGenerator.GeneratorError.requestedModelNotFound {
+                self.logger.error("Couldn't load \(genConfig.model.name) because it doesn't exist.")
+                await ImageGenerator.shared.updateState(
+                    .ready("Couldn't load \(genConfig.model.name) because it doesn't exist."))
             } catch ImageGenerator.GeneratorError.pipelineNotAvailable {
-                await self.logger.error("Pipeline is not loaded.")
-            } catch StableDiffusionPipeline.Error.startingImageProvidedWithoutEncoder {
-                await self.logger.error("The selected model does not support setting a starting image.")
-                await ImageGenerator.shared.updateState(.ready("The selected model does not support setting a starting image."))
+                self.logger.error("Pipeline is not available.")
+                await ImageGenerator.shared.updateState(
+                    .ready("There was a problem loading pipeline."))
+            } catch PipelineError.startingImageProvidedWithoutEncoder {
+                self.logger.error("The selected model does not support setting a starting image.")
+                await ImageGenerator.shared.updateState(
+                    .ready("The selected model does not support setting a starting image."))
             } catch Encoder.Error.sampleInputShapeNotCorrect {
-                await self.logger.error("The starting image size doesn't match the size of the image that will be generated.")
-                await ImageGenerator.shared.updateState(.ready("The starting image size doesn't match the size of the image that will be generated."))
+                self.logger.error(
+                    "The starting image size doesn't match the size of the image that will be generated."
+                )
+                await ImageGenerator.shared.updateState(
+                    .ready(
+                        "The starting image size doesn't match the size of the image that will be generated."
+                    ))
             } catch {
-                await self.logger.error("There was a problem generating images: \(error)")
-                await ImageGenerator.shared.updateState(.error("There was a problem generating images: \(error)"))
+                self.logger.error("There was a problem generating images: \(error)")
+                await ImageGenerator.shared.updateState(
+                    .error("There was a problem generating images: \(error)"))
             }
+        }
+        self.currentGeneration = nil
+        Task.detached {
+            await NotificationController.shared.sendQueueEmptyNotification()
         }
     }
 
@@ -318,52 +434,81 @@ final class ImageController: ObservableObject {
         await removeImage(sdi)
     }
 
+    func setStartingImage(image: CGImage) {
+        startingImage = image
+    }
+
     func selectStartingImage() async {
+        startingImage = await selectImage()
+    }
+
+    func selectStartingImage(sdi: SDImage) async {
+        guard let image = sdi.image else { return }
+        startingImage = image
+    }
+
+    func unsetStartingImage() async {
+        startingImage = nil
+    }
+
+    func setControlNet(name: String) async {
+        if self.currentControlNets.isEmpty {
+            self.currentControlNets = [(name: name, image: nil)]
+        } else {
+            self.currentControlNets[0].name = name
+        }
+    }
+
+    func setControlNet(image: CGImage) async {
+        if self.currentControlNets.isEmpty {
+            self.currentControlNets = [(name: nil, image: image)]
+        } else {
+            self.currentControlNets[0].image = image
+        }
+    }
+
+    func unsetControlNet() async {
+        self.currentControlNets = []
+    }
+
+    func selectControlNetImage(at index: Int) async {
+        await selectImage().map { image in
+            if currentControlNets.isEmpty {
+                currentControlNets = [(name: nil, image: image)]
+            } else if index >= currentControlNets.count {
+                currentControlNets.append((name: nil, image: image))
+            } else {
+                currentControlNets[index].image = image
+            }
+        }
+    }
+
+    func unsetControlNetImage(at index: Int) async {
+        guard index < currentControlNets.count else { return }
+        currentControlNets[index].image = nil
+    }
+
+    func selectImage() async -> CGImage? {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.message = String(localized: "Choose starting image")
-        panel.prompt = String(localized: "Select", comment: "OK button text for choose starting image panel")
+        panel.message = String(
+            localized: "Choose image",
+            comment: "Message text for choosing starting image or ControlNet image")
+        panel.prompt = String(localized: "Select", comment: "OK button text for choose image panel")
         let resp = await panel.beginSheetModal(for: NSApplication.shared.mainWindow!)
         if resp != .OK {
-            return
+            return nil
         }
 
-        guard let url = panel.url else { return }
-        guard let cgImageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return }
+        guard let url = panel.url else { return nil }
+        guard let cgImageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let imageIndex = CGImageSourceGetPrimaryImageIndex(cgImageSource)
-        guard let cgImage = CGImageSourceCreateImageAtIndex(cgImageSource, imageIndex, nil) else { return }
-        if cgImage.width != 512 || cgImage.height != 512 {
-            let alert = NSAlert()
-            alert.messageText = String(localized: "Incorrect image size")
-            alert.informativeText = String(localized: "Starting image must be 512x512.")
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            await alert.beginSheetModal(for: NSApplication.shared.mainWindow!)
-            return
-        }
-        startingImage = cgImage
-    }
 
-    func selectStartingImage(sdi: SDImage) async {
-        guard let image = sdi.image else { return }
-        if image.width != 512 || image.height != 512 {
-            let alert = NSAlert()
-            alert.messageText = String(localized: "Incorrect image size")
-            alert.informativeText = String(localized: "Starting image must be 512x512.")
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            await alert.beginSheetModal(for: NSApplication.shared.mainWindow!)
-            return
-        }
-        startingImage = image
-    }
-
-    func unsetStartingImage() async {
-        startingImage = nil
+        return CGImageSourceCreateImageAtIndex(cgImageSource, imageIndex, nil)
     }
 
     func importImages() async {
@@ -385,7 +530,8 @@ final class ImageController: ObservableObject {
 
         isLoading = true
         var sdis: [SDImage] = []
-        var succeeded = 0, failed = 0
+        var succeeded = 0
+        var failed = 0
 
         for url in selectedURLs {
             var importedURL: URL
@@ -410,7 +556,10 @@ final class ImageController: ObservableObject {
         let alert = NSAlert()
         alert.messageText = String(localized: "Imported \(succeeded) image(s)")
         if failed > 0 {
-            alert.informativeText = String(localized: "\(failed) image(s) were not imported. Only images generated by Mochi Diffusion 2.2 or later can be imported.")
+            alert.informativeText = String(
+                localized:
+                    "\(failed) image(s) were not imported. Only images generated by Mochi Diffusion 2.2 or later can be imported."
+            )
         }
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
@@ -497,7 +646,7 @@ final class ImageController: ObservableObject {
 }
 
 extension CGImage {
-    func asNSImage() -> NSImage {
-        NSImage(cgImage: self, size: NSSize(width: width, height: height))
+    func asTransferableImage() -> TransferableImage {
+        TransferableImage(image: NSImage(cgImage: self, size: NSSize(width: width, height: height)))
     }
 }

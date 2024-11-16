@@ -1,8 +1,4 @@
-"CFBundleDisplayName" = "Mochi Diffusion";
-"CFBundleName" = "Mochi Diffusion";
-"NSHumanReadableCopyright" = "Av Joshua Park";
 "All" = "Samtliga";
-"Apply" = "Tillämpa";
 "CPU & GPU" = "CPU & GPU";
 "CPU & Neural Engine" = "CPU & Neural Engine";
 "Check for Updates…" = "Sök efter uppdateringar…";
@@ -20,9 +16,7 @@
 "HD" = "HD";
 "Height:" = "Höjd:";
 "Image" = "Bild";
-"Image %lld of %lld" = "Bild %lld av %lld";
 "Include in Image" = "Inkludera i bilden";
-"Loading Model..." = "Läser in modell...";
 "ML Compute Unit" = "ML-beräkningsenhet";
 "Mochi Diffusion" = "Mochi Diffusion";
 "Model" = "Modell";
@@ -38,16 +32,11 @@
 "Save All..." = "Spara alla...";
 "Save As..." = "Spara som...";
 "Scheduler" = "Schemaläggare";
-"Search" = "Sök";
-"Searching: %@" = "Söker: %@";
 "Seed" = "Seed";
 "Select Next" = "Välj Nästa";
 "Select Previous" = "Välj föregående";
 "Share..." = "Dela...";
-"Step %lld of %lld" = "Steg %lld av %lld";
 "Steps" = "Steg";
-"Stop Generation" = "Stoppa generering";
-"This may take up to 2 minutes if a model is used for the first time" = "Detta kan ta upp till 2 minuter om en modell används för första gången";
 "Uses the model\'s safety checker module. This does not guarantee that all inappropriate images will be filtered." = "Använder modellens säkerhetskontrollmodul. Detta garanterar inte att alla olämpliga bilder kommer att filtreras.";
 "Website" = "Hemsida";
 "Width:" = "Bredd:";

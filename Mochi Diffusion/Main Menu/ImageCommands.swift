@@ -9,28 +9,30 @@ import SwiftUI
 
 struct ImageCommands: Commands {
     @ObservedObject var controller: ImageController
-    @ObservedObject var generator: ImageGenerator
-    @ObservedObject var store: ImageStore
+    var generator: ImageGenerator
+    var store: ImageStore
+    var focusController: FocusController
 
     var body: some Commands {
         CommandMenu("Image") {
             Section {
-                if case .running = generator.state {
-                    Button {
-                        Task { await ImageGenerator.shared.stopGenerate() }
-                    } label: {
-                        Text("Stop Generation")
+                Button {
+                    Task { await ImageController.shared.generate() }
+                } label: {
+                    if case .ready = ImageGenerator.shared.state {
+                        Text(
+                            "Generate",
+                            comment: "Button to generate image"
+                        )
+                    } else {
+                        Text(
+                            "Add to Queue",
+                            comment: "Button to generate image"
+                        )
                     }
-                    .keyboardShortcut("G", modifiers: .command)
-                } else {
-                    Button {
-                        Task { await ImageController.shared.generate() }
-                    } label: {
-                        Text("Generate")
-                    }
-                    .keyboardShortcut("G", modifiers: .command)
-                    .disabled(controller.modelName.isEmpty)
                 }
+                .keyboardShortcut("G", modifiers: .command)
+                .disabled(controller.modelName.isEmpty)
             }
             Section {
                 Button {
@@ -41,8 +43,8 @@ struct ImageCommands: Commands {
                         comment: "Select next image in Gallery"
                     )
                 }
-                .keyboardShortcut(.rightArrow, modifiers: .command)
-                .disabled(store.images.isEmpty)
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .disabled(store.images.isEmpty || focusController.isTextFieldFocused)
 
                 Button {
                     Task { await ImageController.shared.selectPrevious() }
@@ -52,8 +54,8 @@ struct ImageCommands: Commands {
                         comment: "Select previous image in Gallery"
                     )
                 }
-                .keyboardShortcut(.leftArrow, modifiers: .command)
-                .disabled(store.images.isEmpty)
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .disabled(store.images.isEmpty || focusController.isTextFieldFocused)
             }
             Section {
                 Button {
@@ -75,7 +77,7 @@ struct ImageCommands: Commands {
                         comment: "View current image using Quick Look"
                     )
                 }
-                .keyboardShortcut("L", modifiers: .command)
+                .keyboardShortcut(" ", modifiers: [])
                 .disabled(store.selected() == nil)
             }
             Section {
@@ -88,7 +90,7 @@ struct ImageCommands: Commands {
                     )
                 }
                 .keyboardShortcut(.delete, modifiers: .command)
-                .disabled(store.selected() == nil)
+                .disabled(store.selected() == nil || focusController.isTextFieldFocused)
             }
         }
     }

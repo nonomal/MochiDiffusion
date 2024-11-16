@@ -10,7 +10,7 @@ import SwiftUI
 struct SizeView: View {
     @EnvironmentObject private var controller: ImageController
     private let imageSizes = [
-        256, 320, 384, 448, 512, 576, 640, 704, 768
+        256, 320, 384, 448, 512, 576, 640, 704, 768,
     ]
 
     var body: some View {
@@ -43,9 +43,7 @@ struct SizeView: View {
     }
 }
 
-struct SizeView_Previews: PreviewProvider {
-    static var previews: some View {
-        SizeView()
-            .environmentObject(ImageController.shared)
-    }
+#Preview {
+    SizeView()
+        .environmentObject(ImageController.shared)
 }

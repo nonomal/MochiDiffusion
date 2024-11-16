@@ -23,19 +23,19 @@ struct MochiCompactSliderStyle: CompactSliderStyle {
 
 extension NSApplication {
     static var appVersion: String {
-        // swiftlint:disable:next force_cast
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as! String
     }
 }
 
 extension View {
-    func syncFocus<T: Equatable>(_ binding: Binding<T>, with focusState: FocusState<T>) -> some View {
+    func syncFocus<T: Equatable>(_ binding: Binding<T>, with focusState: FocusState<T>) -> some View
+    {
         self
             .onChange(of: binding.wrappedValue) {
-                focusState.wrappedValue = $0
+                focusState.wrappedValue = binding.wrappedValue
             }
             .onChange(of: focusState.wrappedValue) {
-                binding.wrappedValue = $0
+                binding.wrappedValue = focusState.wrappedValue
             }
     }
 }
@@ -51,33 +51,83 @@ extension NSImage {
     }
 }
 
-extension NSImage: Transferable {
+extension CGImage {
+    func scaledAndCroppedTo(size: CGSize) -> CGImage? {
+        let sizeRatio = size.width / size.height
+        let imageSizeRatio = Double(self.width) / Double(self.height)
+        let scaleFactor =
+            sizeRatio > imageSizeRatio
+            ? size.width / Double(self.width) : size.height / Double(self.height)
+        let scaledWidth = CGFloat(self.width) * scaleFactor
+        let scaledHeight = CGFloat(self.height) * scaleFactor
+
+        // Calculate the origin point of the crop
+        let cropX = (scaledWidth - size.width) / 2.0
+        let cropY = (scaledHeight - size.height) / 2.0
+
+        guard
+            let context = CGContext(
+                data: nil,
+                width: Int(size.width),
+                height: Int(size.height),
+                bitsPerComponent: self.bitsPerComponent,
+                bytesPerRow: 0,
+                space: self.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            return nil
+        }
+
+        // Adjust the context to handle the scaled image
+        context.translateBy(x: -cropX, y: -cropY)
+        context.scaleBy(x: scaleFactor, y: scaleFactor)
+
+        // Draw the image into the context
+        context.interpolationQuality = .high
+        context.draw(self, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        // Extract the cropped and resized image from the context
+        let scaledCroppedImage = context.makeImage()
+
+        return scaledCroppedImage
+    }
+}
+
+public struct TransferableImage {
+    public let image: NSImage
+}
+
+extension TransferableImage: Transferable {
+    public static var transferRepresentation: some TransferRepresentation {
+        ProxyRepresentation<TransferableImage, URL> { transferableImage in
+            try transferableImage.image.temporaryFileURL()
+        }
+    }
+}
+
+extension NSImage {
     private static var urlCache = [Int: URL]()
 
-    public static var transferRepresentation: some TransferRepresentation {
-        // swiftlint:disable:next trailing_closure
-        ProxyRepresentation<NSImage, URL>(exporting: { image in
-            let nsImage: NSImage = image
-            return try nsImage.temporaryFileURL()
-        })
-    }
-
     public static func cleanupTempFiles() {
-        for url in NSImage.urlCache {
+        for url in self.urlCache {
             try? FileManager.default.removeItem(at: url.value)
         }
     }
 
     func temporaryFileURL() throws -> URL {
         let imageHash = self.getImageHash()
-        if let cachedURL = NSImage.urlCache[imageHash] {
+        if let cachedURL = Self.urlCache[imageHash],
+            FileManager.default.fileExists(atPath: cachedURL.path(percentEncoded: false))
+        {
             return cachedURL
         }
         let name = String(imageHash)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name, conformingTo: .png)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            name, conformingTo: .png)
         let fileWrapper = FileWrapper(regularFileWithContents: self.toPngData())
         try fileWrapper.write(to: url, originalContentsURL: nil)
-        NSImage.urlCache[imageHash] = url
+        Self.urlCache[imageHash] = url
         return url
     }
 }
@@ -113,7 +163,8 @@ extension Text {
         func body(content: Content) -> some View {
             content
                 .textSelection(.enabled)
-                .foregroundColor(Color(nsColor: .textColor)) /// Fixes dark text in dark mode SwiftUI bug
+                .foregroundColor(Color(nsColor: .textColor))
+            /// Fixes dark text in dark mode SwiftUI bug
         }
     }
 

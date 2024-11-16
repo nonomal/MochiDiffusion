@@ -9,9 +9,12 @@ import CoreML
 import StableDiffusion
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var controller: ImageController
+    @Environment(NotificationController.self) private var notificationController:
+        NotificationController
 
     var body: some View {
         VStack(spacing: 16) {
@@ -38,23 +41,17 @@ struct SettingsView: View {
                             Image(systemName: "photo")
                         }
                     }
-            }
-
-            HStack {
-                Spacer()
-
-                Button {
-                    Task {
-                        NSApplication.shared.keyWindow?.close()
-                        await ImageController.shared.load()
+                notificationsView
+                    .tabItem {
+                        Label {
+                            Text(
+                                "Notifications",
+                                comment: "Settings tab header label"
+                            )
+                        } icon: {
+                            Image(systemName: "bell.badge")
+                        }
                     }
-                } label: {
-                    Text(
-                        "Apply",
-                        comment: "Button to apply the selected settings"
-                    )
-                }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding()
@@ -85,7 +82,9 @@ struct SettingsView: View {
                             .disabled(!$controller.autosaveImages.wrappedValue)
 
                         Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: controller.imageDir).absoluteURL])
+                            guard let url = showOpenPanel(from: URL(string: controller.imageDir))
+                            else { return }
+                            controller.imageDir = url.path(percentEncoded: false)
                         } label: {
                             Image(systemName: "magnifyingglass.circle.fill")
                                 .foregroundColor(Color.secondary)
@@ -127,7 +126,34 @@ struct SettingsView: View {
                             .textFieldStyle(.roundedBorder)
 
                         Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: controller.modelDir).absoluteURL])
+                            guard let url = showOpenPanel(from: URL(string: controller.modelDir))
+                            else { return }
+                            controller.modelDir = url.path(percentEncoded: false)
+                        } label: {
+                            Image(systemName: "magnifyingglass.circle.fill")
+                                .foregroundColor(Color.secondary)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help("Open in Finder")
+                    }
+                }
+                .padding(4)
+            }
+
+            GroupBox {
+                VStack(alignment: .leading) {
+                    Text("ControlNet Folder")
+
+                    HStack {
+                        TextField("", text: $controller.controlNetDir)
+                            .disableAutocorrection(true)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button {
+                            guard
+                                let url = showOpenPanel(from: URL(string: controller.controlNetDir))
+                            else { return }
+                            controller.controlNetDir = url.path(percentEncoded: false)
                         } label: {
                             Image(systemName: "magnifyingglass.circle.fill")
                                 .foregroundColor(Color.secondary)
@@ -187,6 +213,28 @@ struct SettingsView: View {
     private var imageView: some View {
         VStack(alignment: .leading, spacing: 16) {
             GroupBox {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("Show Image Preview")
+
+                        Spacer()
+
+                        Toggle("", isOn: $controller.showGenerationPreview)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+
+                    Text(
+                        "Show the image as its being generated.",
+                        comment: "Help text for Show Image Preview setting"
+                    )
+                    .helpTextFormat()
+                }
+                .padding(4)
+            }
+
+            GroupBox {
                 HStack {
                     Text("Scheduler")
 
@@ -202,7 +250,6 @@ struct SettingsView: View {
                 }
                 .padding(4)
 
-                #if arch(arm64)
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -212,14 +259,22 @@ struct SettingsView: View {
                         Spacer()
 
                         Picker("", selection: $controller.mlComputeUnitPreference) {
-                            Text("Auto (Recommended)", comment: "Option to use the CPU + Neural Engine for split-einsum models, and CPU + GPU for original models")
-                                .tag(ComputeUnitPreference.auto)
+                            Text(
+                                "Auto (Recommended)",
+                                comment:
+                                    "Option to use the CPU + Neural Engine for split-einsum models, and CPU + GPU for original models"
+                            )
+                            .tag(ComputeUnitPreference.auto)
                             Text("CPU & Neural Engine")
                                 .tag(ComputeUnitPreference.cpuAndNeuralEngine)
                             Text("CPU & GPU")
                                 .tag(ComputeUnitPreference.cpuAndGPU)
-                            Text("All", comment: "Option to use all CPU, GPU, & Neural Engine for compute unit")
-                                .tag(ComputeUnitPreference.all)
+                            Text(
+                                "All",
+                                comment:
+                                    "Option to use all CPU, GPU, & Neural Engine for compute unit"
+                            )
+                            .tag(ComputeUnitPreference.all)
                         }
                         .labelsHidden()
                         .fixedSize()
@@ -245,11 +300,12 @@ struct SettingsView: View {
 
                     Divider()
 
-                    Text("Manually selecting an incompatible ML Compute Unit may cause poor performance or crash.")
-                        .helpTextFormat()
+                    Text(
+                        "Manually selecting an incompatible ML Compute Unit may cause poor performance or crash."
+                    )
+                    .helpTextFormat()
                 }
                 .padding(4)
-                #endif
             }
 
             GroupBox {
@@ -274,11 +330,94 @@ struct SettingsView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var notificationsView: some View {
+        @Bindable var notificationController = notificationController
+
+        VStack(alignment: .leading, spacing: 16) {
+            GroupBox {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("Send Notifications")
+
+                        Spacer()
+
+                        Toggle("", isOn: $notificationController.sendNotification)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .onChange(of: notificationController.sendNotification) {
+                                if notificationController.sendNotification {
+                                    notificationController.requestForNotificationAuthorization()
+                                }
+                            }
+                    }
+                    Text(
+                        "Send notification when images are ready.",
+                        comment: "Help text for Send Notifications setting"
+                    )
+                    .helpTextFormat()
+
+                    if notificationController.sendNotification,
+                        notificationController.authStatus != .authorized
+                    {
+                        // on iOS there is `openNotificationSettingsURLString` but for macOS,
+                        // seems like we need to manually call this here.
+                        Link(
+                            destination: URL(
+                                string:
+                                    "x-apple.systempreferences:com.apple.preference.notifications")!
+                        ) {
+                            Text(
+                                "Allow Mochi Diffusion to send notifications under System Settings."
+                            )
+                            .multilineTextAlignment(.leading)
+                        }
+                    }
+                }
+                .padding(4)
+
+                Divider()
+
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("Play notification sound")
+
+                        Spacer()
+
+                        Toggle("", isOn: $notificationController.playNotificationSound)
+                            .disabled(!notificationController.sendNotification)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                }
+                .padding(4)
+            }.task {
+                _ = await notificationController.fetchAuthStatus()
+            }
+        }
+    }
+
+    private func showOpenPanel(from initialDirectoryURL: URL?) -> URL? {
+        let openPanel = NSOpenPanel()
+        openPanel.directoryURL = initialDirectoryURL
+        openPanel.allowsMultipleSelection = false
+        openPanel.canChooseDirectories = true
+        openPanel.canChooseFiles = false
+        openPanel.canCreateDirectories = true
+        let response = openPanel.runModal()
+
+        guard response == .OK, let url = openPanel.url else {
+            return nil
+        }
+
+        return url
+    }
 }
 
-struct SettingsView_Previews: PreviewProvider {
-    static var previews: some View {
-        SettingsView()
-            .environmentObject(ImageController.shared)
-    }
+#Preview {
+    SettingsView()
+        .environmentObject(ImageController.shared)
 }

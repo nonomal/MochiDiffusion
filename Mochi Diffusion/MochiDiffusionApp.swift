@@ -1,5 +1,5 @@
 //
-//  App.swift
+//  MochiDiffusionApp.swift
 //  Mochi Diffusion
 //
 //  Created by Joshua Park on 12/16/22.
@@ -8,13 +8,15 @@
 import QuickLook
 import Sparkle
 import SwiftUI
+import UserNotifications
 
 @main
 struct MochiDiffusionApp: App {
     @StateObject private var controller: ImageController
-    @StateObject private var generator: ImageGenerator
-    @StateObject private var store: ImageStore
-    @StateObject private var focusCon: FocusController
+    @State private var generator: ImageGenerator
+    @State private var store: ImageStore
+    @State private var focusCon: FocusController
+    @State private var notificationController: NotificationController
     private let updaterController: SPUStandardUpdaterController
 
     init() {
@@ -22,6 +24,7 @@ struct MochiDiffusionApp: App {
         self._generator = .init(wrappedValue: .shared)
         self._store = .init(wrappedValue: .shared)
         self._focusCon = .init(wrappedValue: .shared)
+        self._notificationController = .init(wrappedValue: .shared)
 
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
@@ -34,9 +37,9 @@ struct MochiDiffusionApp: App {
         Window("Mochi Diffusion", id: "main") {
             AppView()
                 .environmentObject(controller)
-                .environmentObject(generator)
-                .environmentObject(store)
-                .environmentObject(focusCon)
+                .environment(generator)
+                .environment(store)
+                .environment(focusCon)
                 .sheet(isPresented: $controller.isLoading) {
                     VStack {
                         ProgressView()
@@ -47,11 +50,15 @@ struct MochiDiffusionApp: App {
                     .padding([.leading, .trailing], 60)
                 }
                 .quickLookPreview($controller.quicklookURL)
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                .onReceive(
+                    NotificationCenter.default.publisher(
+                        for: NSApplication.willTerminateNotification)
+                ) { _ in
                     /// cleanup quick look temp images
                     NSImage.cleanupTempFiles()
                     /// cleanup MPS temp folder
-                    let mpsURL = FileManager.default.temporaryDirectory.appendingPathComponent("com.apple.MetalPerformanceShadersGraph", isDirectory: true)
+                    let mpsURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+                        "com.apple.MetalPerformanceShadersGraph", isDirectory: true)
                     try? FileManager.default.removeItem(at: mpsURL)
                 }
         }
@@ -59,7 +66,9 @@ struct MochiDiffusionApp: App {
             AppCommands(updater: updaterController.updater)
             FileCommands(store: store)
             SidebarCommands()
-            ImageCommands(controller: controller, generator: generator, store: store)
+            ImageCommands(
+                controller: controller, generator: generator, store: store,
+                focusController: focusCon)
             HelpCommands()
         }
         .defaultSize(width: 1_120, height: 670)
@@ -67,6 +76,7 @@ struct MochiDiffusionApp: App {
         Settings {
             SettingsView()
                 .environmentObject(controller)
+                .environment(notificationController)
         }
     }
 }

@@ -9,14 +9,16 @@ import SwiftUI
 
 struct SeedView: View {
     @EnvironmentObject private var controller: ImageController
-    @EnvironmentObject private var focusCon: FocusController
+    @Environment(FocusController.self) private var focusCon: FocusController
     @FocusState private var focused: Bool
 
     var body: some View {
+        @Bindable var focusCon = focusCon
+
         Text("Seed")
             .sidebarLabelFormat()
         HStack {
-            TextField("random", value: $controller.seed, formatter: Formatter.seedFormatter)
+            TextField("random", value: $controller.seed, formatter: Formatter.seed)
                 .focused($focused)
                 .syncFocus($focusCon.seedFieldIsFocused, with: _focused)
                 .textFieldStyle(.roundedBorder)
@@ -35,7 +37,7 @@ struct SeedView: View {
 }
 
 extension Formatter {
-    static let seedFormatter: NumberFormatter = {
+    static let seed: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.minimum = 0
@@ -49,9 +51,7 @@ extension Formatter {
     }()
 }
 
-struct SeedView_Previews: PreviewProvider {
-    static var previews: some View {
-        SeedView()
-            .environmentObject(ImageController.shared)
-    }
+#Preview {
+    SeedView()
+        .environmentObject(ImageController.shared)
 }
